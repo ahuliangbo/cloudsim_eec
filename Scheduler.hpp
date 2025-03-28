@@ -24,6 +24,7 @@ public:
     void TaskComplete(Time_t now, TaskId_t task_id);
     void AddTask(TaskId_t task_id, VMId_t vm_id, Priority_t priority);
     void RemoveTask(TaskId_t task_id, VMId_t vm_id);
+    map<MachineId_t, unsigned int> machines_mm;
 private:
     vector<VMId_t> vms;
     map<TaskId_t, VMId_t> tasks;

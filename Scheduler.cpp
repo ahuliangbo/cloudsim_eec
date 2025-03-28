@@ -24,6 +24,7 @@ void Scheduler::Init() {
     for(int i =0; i < Machine_GetTotal(); ++i){
         machines.push_back(MachineId_t(i));
         machines_map[machines[i]] = 0;
+        machines_mm[machines[i]] = 0;
         VMId_t vm = VM_Create(LINUX, Machine_GetInfo(machines[i]).cpu);
         // vms.push_back(vm);
         machines_vms_map[machines[i]].push_back(vm);
@@ -149,13 +150,16 @@ void Scheduler::AddTask(TaskId_t task_id, VMId_t vm_id, Priority_t priority) {
     VM_AddTask(vm_id, task_id, priority);
     tasks[task_id] = vm_id;
     machines_map[v_info.machine_id] += t_info.total_instructions/1000000;
+    machines_mm[v_info.machine_id]++;
 }
 void Scheduler::RemoveTask(TaskId_t task_id, VMId_t vm_id) {
     VMInfo_t v_info = VM_GetInfo(vm_id);
     TaskInfo_t t_info = GetTaskInfo(task_id);
     tasks.erase(task_id);
+    
     machines_map[v_info.machine_id] = machines_map[v_info.machine_id]<t_info.total_instructions/1000000 ?
     0 : machines_map[v_info.machine_id]-t_info.total_instructions/1000000;
+    
 }
 
 void Scheduler::PeriodicCheck(Time_t now) {
@@ -232,7 +236,9 @@ void SimulationComplete(Time_t time) {
     cout << "Total Energy " << Machine_GetClusterEnergy() << "KW-Hour" << endl;
     cout << "Simulation run finished in " << double(time)/1000000 << " seconds" << endl;
     SimOutput("SimulationComplete(): Simulation finished at time " + to_string(time), 4);
-    
+    for (const auto& pair : Scheduler.machines_mm) {
+        std::cout << "Machine ID: " << pair.first << " -> Task Count: " << pair.second << std::endl;
+    }
     Scheduler.Shutdown(time);
 }
 
