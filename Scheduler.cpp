@@ -52,7 +52,7 @@ void Scheduler::Init() {
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     // Update your data structure. The VM now can receive new tasks
 }
-
+static int ss = 0;
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // Get the task parameters
     //  IsGPUCapable(task_id);
@@ -74,27 +74,27 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     TaskInfo_t t_info = GetTaskInfo(task_id);
     Priority_t priority = (t_info.required_sla != SLAType_t::SLA3)? MID_PRIORITY : LOW_PRIORITY;
 
-    
-    //chatgpt comparator and minheap
-    auto cmp = [](const std::pair<unsigned, unsigned>& a, const std::pair<unsigned, unsigned>& b) {
-        return a.second > b.second; // Min-heap based on second element
+    static int ss = 0;
+    //chatgpt comparator and maxHeap
+    auto cmp = [](const std::pair<unsigned, unsigned long long>& a, const std::pair<unsigned, unsigned long long>& b) {
+        return a.second < b.second; // Max-heap based on second element
     };
-    std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>, decltype(cmp)> minHeap(cmp);
+    std::priority_queue<std::pair<unsigned, unsigned long long>, std::vector<std::pair<unsigned, unsigned long long>>, decltype(cmp)> maxHeap(cmp);
 
     for(int i =0; i < Machine_GetTotal(); ++i){
         bool added = false;
         MachineInfo_t m_info = Machine_GetInfo(machines[i]);
-        unsigned int ETA = machines_map[machines[i]]/m_info.performance[m_info.p_state]+ Now();
-        minHeap.push({ machines[i],ETA });
+        unsigned long long ETA = machines_map[machines[i]]/m_info.performance[m_info.p_state]+ Now();
+        maxHeap.push({ machines[i],ETA });
     }
-    //get top (could change to be only nonzero tops)
+    //get top 
     bool added = false;
-    while(!added){
-        MachineId_t BestFit = minHeap.top().first;
-        minHeap.pop();
+    while(!added &&maxHeap.size() >= 1){
+        MachineId_t BestFit = maxHeap.top().first;
+        maxHeap.pop();
         MachineInfo_t m_info = Machine_GetInfo(BestFit);
-        unsigned int b_ETA = machines_map[BestFit]/m_info.performance[m_info.p_state]+ Now();
-        if(m_info.memory_size - m_info.memory_used - t_info.required_memory - VM_MEMORY_OVERHEAD < 0 && !minHeap.empty()){
+        unsigned long long b_ETA = machines_map[BestFit]/m_info.performance[m_info.p_state]+ Now();
+        if(m_info.memory_size - m_info.memory_used - t_info.required_memory - VM_MEMORY_OVERHEAD < 0 && !maxHeap.empty() || b_ETA / t_info.target_completion > 1.001){ //arbitrary threshold
             continue;
         }
         vector<VMId_t> machine_vms = machines_vms_map[BestFit];
@@ -105,11 +105,12 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
                 added = true;
                 //add task, update data structures
                 //if eta vs required time ratio is too low
-                if(b_ETA / t_info.target_completion > 1.1){
+                if(b_ETA / t_info.target_completion > 1){
                      priority = HIGH_PRIORITY;
                 }
                 
                 AddTask(task_id, machine_vms[i], priority);
+                break;
             }
         }
         if(m_info.active_vms == 0 || added == false && t_info.required_cpu == m_info.cpu){
@@ -120,10 +121,11 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
             machines_vms_map[BestFit].push_back(vm);
             // vms.pushback();
 
-            if(b_ETA / t_info.target_completion > 1.01){
+            if(b_ETA / t_info.target_completion > 1){
                 priority = HIGH_PRIORITY;
             }
             AddTask(task_id, vm, priority);
+            break;
         }
     }
     //bandaid last resort
@@ -136,10 +138,10 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
                 VM_Attach(vm, machines[i]);
                 machines_vms_map[machines[i]].push_back(vm);
                 // vms.pushback();
-
                 priority = HIGH_PRIORITY;
-                
+                added = true;
                 AddTask(task_id, vm, priority);
+                break;
             }
         }
     }
@@ -149,16 +151,18 @@ void Scheduler::AddTask(TaskId_t task_id, VMId_t vm_id, Priority_t priority) {
     TaskInfo_t t_info = GetTaskInfo(task_id);
     VM_AddTask(vm_id, task_id, priority);
     tasks[task_id] = vm_id;
-    machines_map[v_info.machine_id] += t_info.total_instructions/1000000;
+    machines_map[v_info.machine_id] += t_info.total_instructions;
     machines_mm[v_info.machine_id]++;
+    ss++;
+    cout << ss<<endl;
 }
 void Scheduler::RemoveTask(TaskId_t task_id, VMId_t vm_id) {
     VMInfo_t v_info = VM_GetInfo(vm_id);
     TaskInfo_t t_info = GetTaskInfo(task_id);
     tasks.erase(task_id);
     
-    machines_map[v_info.machine_id] = machines_map[v_info.machine_id]<t_info.total_instructions/1000000 ?
-    0 : machines_map[v_info.machine_id]-t_info.total_instructions/1000000;
+    machines_map[v_info.machine_id] = machines_map[v_info.machine_id]<t_info.total_instructions ?
+    0 : machines_map[v_info.machine_id]-t_info.total_instructions;
     
 }
 
@@ -244,6 +248,7 @@ void SimulationComplete(Time_t time) {
 
 void SLAWarning(Time_t time, TaskId_t task_id) {
     
+    // SimOutput("actual time " + to_string(time) + " expected " + to_string(GetTaskInfo(task_id).target_completion) + "  arrival "+ to_string(GetTaskInfo(task_id).arrival), 0);
 }
 
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
