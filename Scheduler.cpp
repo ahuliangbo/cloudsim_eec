@@ -52,7 +52,7 @@ void Scheduler::Init() {
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     // Update your data structure. The VM now can receive new tasks
 }
-static int ss = 0;
+static unsigned long long ss = 0;
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // Get the task parameters
     //  IsGPUCapable(task_id);
@@ -73,7 +73,6 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // Other possibilities as desired
     TaskInfo_t t_info = GetTaskInfo(task_id);
     Priority_t priority = (t_info.required_sla != SLAType_t::SLA3)? MID_PRIORITY : LOW_PRIORITY;
-
     static int ss = 0;
     //chatgpt comparator and maxHeap
     auto cmp = [](const std::pair<unsigned, unsigned long long>& a, const std::pair<unsigned, unsigned long long>& b) {
@@ -87,6 +86,9 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         unsigned long long ETA = machines_map[machines[i]]/m_info.performance[m_info.p_state]+ Now();
         maxHeap.push({ machines[i],ETA });
     }
+    for (const auto& pair : machines_map) {
+        std::cout << "Machine ID: " << pair.first << " -> Instructions: " << pair.second << std::endl;
+    }
     //get top 
     bool added = false;
     while(!added &&maxHeap.size() >= 1){
@@ -94,7 +96,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         maxHeap.pop();
         MachineInfo_t m_info = Machine_GetInfo(BestFit);
         unsigned long long b_ETA = machines_map[BestFit]/m_info.performance[m_info.p_state]+ Now();
-        if(m_info.memory_size - m_info.memory_used - t_info.required_memory - VM_MEMORY_OVERHEAD < 0 && !maxHeap.empty() || b_ETA / t_info.target_completion > 1.001){ //arbitrary threshold
+
+        if(m_info.memory_size - m_info.memory_used - t_info.required_memory - VM_MEMORY_OVERHEAD < 0 && !maxHeap.empty() || b_ETA / t_info.target_completion > 1.1){ //arbitrary threshold
             continue;
         }
         vector<VMId_t> machine_vms = machines_vms_map[BestFit];
@@ -134,6 +137,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
             MachineInfo_t m_info = Machine_GetInfo(machines[i]);
             if(t_info.required_cpu == m_info.cpu){
                             //make vm and add
+                            ss++;
+                cout << ss<<endl;
                 VMId_t vm = VM_Create( t_info.required_vm, t_info.required_cpu);
                 VM_Attach(vm, machines[i]);
                 machines_vms_map[machines[i]].push_back(vm);
@@ -153,8 +158,6 @@ void Scheduler::AddTask(TaskId_t task_id, VMId_t vm_id, Priority_t priority) {
     tasks[task_id] = vm_id;
     machines_map[v_info.machine_id] += t_info.total_instructions;
     machines_mm[v_info.machine_id]++;
-    ss++;
-    cout << ss<<endl;
 }
 void Scheduler::RemoveTask(TaskId_t task_id, VMId_t vm_id) {
     VMInfo_t v_info = VM_GetInfo(vm_id);
@@ -190,7 +193,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     // Decide if a machine is to be turned off, slowed down, or VMs to be migrated according to your policy
     // This is an opportunity to make any adjustments to optimize performance/energy
     RemoveTask(task_id, tasks[task_id]);
-    SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now), 4);
+    SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now), 1);
 }
 
 // Public interface below
@@ -208,8 +211,8 @@ void HandleNewTask(Time_t time, TaskId_t task_id) {
 }
 
 void HandleTaskCompletion(Time_t time, TaskId_t task_id) {
-    SimOutput("HandleTaskCompletion(): Task " + to_string(task_id) + " completed at time " + to_string(time), 4);
     Scheduler.TaskComplete(time, task_id);
+    SimOutput("HandleTaskCompletion(): Task " + to_string(task_id) + " completed at time " + to_string(time), 4);
 }
 
 void MemoryWarning(Time_t time, MachineId_t machine_id) {
@@ -243,6 +246,7 @@ void SimulationComplete(Time_t time) {
     for (const auto& pair : Scheduler.machines_mm) {
         std::cout << "Machine ID: " << pair.first << " -> Task Count: " << pair.second << std::endl;
     }
+
     Scheduler.Shutdown(time);
 }
 
