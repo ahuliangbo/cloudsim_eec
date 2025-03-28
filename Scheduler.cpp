@@ -21,25 +21,31 @@ void Scheduler::Init() {
     // 
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
-    for(unsigned i = 0; i < active_machines; i++)
-        vms.push_back(VM_Create(LINUX, X86));
-    for(unsigned i = 0; i < active_machines; i++) {
+    for(int i =0; i < Machine_GetTotal(); ++i){
         machines.push_back(MachineId_t(i));
-    }    
-    for(unsigned i = 0; i < active_machines; i++) {
-        VM_Attach(vms[i], machines[i]);
+        machines_map[machines[i]] = 0;
+        VMId_t vm = VM_Create(LINUX, Machine_GetInfo(machines[i]).cpu);
+        // vms.push_back(vm);
+        machines_vms_map[machines[i]].push_back(vm);
+        VM_Attach(vm, machines[i]);
+      
     }
+    // for (const auto& pair : machines_vms_map) {
+    //     std::cout << "Machine ID: " << pair.first << " -> VMs: ";
+    //     if (pair.second.empty()) {
+    //         std::cout << "No VMs";
+    //     } else {
+    //         for (const auto& vm : pair.second) {
+    //             std::cout << vm << " ";
+    //         }
+    //     }
+    //     std::cout << std::endl;
+    // }
+    // for( auto machine:machines){
+    //     MachineInfo_t inf = Machine_GetInfo(machine);
 
-    bool dynamic = false;
-    if(dynamic)
-        for(unsigned i = 0; i<4 ; i++)
-            for(unsigned j = 0; j < 8; j++)
-                Machine_SetCorePerformance(MachineId_t(0), j, P3);
-    // Turn off the ARM machines
-    for(unsigned i = 24; i < Machine_GetTotal(); i++)
-        Machine_SetState(MachineId_t(i), S5);
-
-    SimOutput("Scheduler::Init(): VM ids are " + to_string(vms[0]) + " ahd " + to_string(vms[1]), 3);
+    //     cout << inf.active_vms << endl;
+    // }
 }
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
@@ -64,13 +70,92 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // Turn on a machine, migrate an existing VM from a loaded machine....
     //
     // Other possibilities as desired
-    Priority_t priority = (task_id == 0 || task_id == 64)? HIGH_PRIORITY : MID_PRIORITY;
-    if(migrating) {
-        VM_AddTask(vms[0], task_id, priority);
+    TaskInfo_t t_info = GetTaskInfo(task_id);
+    Priority_t priority = (t_info.required_sla != SLAType_t::SLA3)? MID_PRIORITY : LOW_PRIORITY;
+
+    
+    //chatgpt comparator and minheap
+    auto cmp = [](const std::pair<unsigned, unsigned>& a, const std::pair<unsigned, unsigned>& b) {
+        return a.second > b.second; // Min-heap based on second element
+    };
+    std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>, decltype(cmp)> minHeap(cmp);
+
+    for(int i =0; i < Machine_GetTotal(); ++i){
+        bool added = false;
+        MachineInfo_t m_info = Machine_GetInfo(machines[i]);
+        unsigned int ETA = machines_map[machines[i]]/m_info.performance[m_info.p_state]+ Now();
+        minHeap.push({ machines[i],ETA });
     }
-    else {
-        VM_AddTask(vms[task_id % active_machines], task_id, priority);
-    }// Skeleton code, you need to change it according to your algorithm
+    //get top (could change to be only nonzero tops)
+    bool added = false;
+    while(!added){
+        MachineId_t BestFit = minHeap.top().first;
+        minHeap.pop();
+        MachineInfo_t m_info = Machine_GetInfo(BestFit);
+        unsigned int b_ETA = machines_map[BestFit]/m_info.performance[m_info.p_state]+ Now();
+        if(m_info.memory_size - m_info.memory_used - t_info.required_memory - VM_MEMORY_OVERHEAD < 0 && !minHeap.empty()){
+            continue;
+        }
+        vector<VMId_t> machine_vms = machines_vms_map[BestFit];
+        // assert(machine_vms.size() == m_info.active_vms);
+        for(int i =0; i < machine_vms.size(); ++i){
+            VMInfo_t v_info = VM_GetInfo(machine_vms[i]);
+            if( t_info.required_cpu== v_info.cpu && t_info.required_vm == v_info.vm_type){
+                added = true;
+                //add task, update data structures
+                //if eta vs required time ratio is too low
+                if(b_ETA / t_info.target_completion > 1.1){
+                     priority = HIGH_PRIORITY;
+                }
+                
+                AddTask(task_id, machine_vms[i], priority);
+            }
+        }
+        if(m_info.active_vms == 0 || added == false && t_info.required_cpu == m_info.cpu){
+            added = true;
+            //make vm and add
+            VMId_t vm = VM_Create( t_info.required_vm, t_info.required_cpu);
+            VM_Attach(vm, BestFit);
+            machines_vms_map[BestFit].push_back(vm);
+            // vms.pushback();
+
+            if(b_ETA / t_info.target_completion > 1.01){
+                priority = HIGH_PRIORITY;
+            }
+            AddTask(task_id, vm, priority);
+        }
+    }
+    //bandaid last resort
+    if(!added){
+        for(int i =0; i < Machine_GetTotal(); ++i){
+            MachineInfo_t m_info = Machine_GetInfo(machines[i]);
+            if(t_info.required_cpu == m_info.cpu){
+                            //make vm and add
+                VMId_t vm = VM_Create( t_info.required_vm, t_info.required_cpu);
+                VM_Attach(vm, machines[i]);
+                machines_vms_map[machines[i]].push_back(vm);
+                // vms.pushback();
+
+                priority = HIGH_PRIORITY;
+                
+                AddTask(task_id, vm, priority);
+            }
+        }
+    }
+}
+void Scheduler::AddTask(TaskId_t task_id, VMId_t vm_id, Priority_t priority) {
+    VMInfo_t v_info = VM_GetInfo(vm_id);
+    TaskInfo_t t_info = GetTaskInfo(task_id);
+    VM_AddTask(vm_id, task_id, priority);
+    tasks[task_id] = vm_id;
+    machines_map[v_info.machine_id] += t_info.total_instructions/1000000;
+}
+void Scheduler::RemoveTask(TaskId_t task_id, VMId_t vm_id) {
+    VMInfo_t v_info = VM_GetInfo(vm_id);
+    TaskInfo_t t_info = GetTaskInfo(task_id);
+    tasks.erase(task_id);
+    machines_map[v_info.machine_id] = machines_map[v_info.machine_id]<t_info.total_instructions/1000000 ?
+    0 : machines_map[v_info.machine_id]-t_info.total_instructions/1000000;
 }
 
 void Scheduler::PeriodicCheck(Time_t now) {
@@ -96,6 +181,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     // Do any bookkeeping necessary for the data structures
     // Decide if a machine is to be turned off, slowed down, or VMs to be migrated according to your policy
     // This is an opportunity to make any adjustments to optimize performance/energy
+    RemoveTask(task_id, tasks[task_id]);
     SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now), 4);
 }
 
@@ -120,7 +206,7 @@ void HandleTaskCompletion(Time_t time, TaskId_t task_id) {
 
 void MemoryWarning(Time_t time, MachineId_t machine_id) {
     // The simulator is alerting you that machine identified by machine_id is overcommitted
-    SimOutput("MemoryWarning(): Overflow at " + to_string(machine_id) + " was detected at time " + to_string(time), 0);
+    SimOutput("MemoryWarning(): Overflow at " + to_string(machine_id) + " was detected at time " + to_string(time), 1);
 }
 
 void MigrationDone(Time_t time, VMId_t vm_id) {
@@ -134,12 +220,7 @@ void SchedulerCheck(Time_t time) {
     // This function is called periodically by the simulator, no specific event
     SimOutput("SchedulerCheck(): SchedulerCheck() called at " + to_string(time), 4);
     Scheduler.PeriodicCheck(time);
-    static unsigned counts = 0;
-    counts++;
-    if(counts == 10) {
-        migrating = true;
-        VM_Migrate(1, 9);
-    }
+
 }
 
 void SimulationComplete(Time_t time) {
