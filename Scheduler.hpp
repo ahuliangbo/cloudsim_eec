@@ -25,14 +25,16 @@ public:
     void AddTask(TaskId_t task_id, VMId_t vm_id, Priority_t priority);
     void RemoveTask(TaskId_t task_id, VMId_t vm_id);
     map<MachineId_t, unsigned int> machines_mm;
+    map<MachineId_t, unsigned int> machines_tc;
     map<TaskId_t, VMId_t> tasks;
-    // map<MachineId_t, unsigned > total_fail;
-    // map<MachineId_t, unsigned > fail_count;
-    // map<MachineId_t, unsigned > avg_fail;
-private:
-    vector<VMId_t> vms;
-    map<MachineId_t, vector<VMId_t>> machines_vms_map;
+    map<MachineId_t, unsigned > total_fail;
+    map<MachineId_t, unsigned > fail_count;
+    map<MachineId_t, unsigned > avg_fail;
     vector<MachineId_t> machines;
+    map<VMId_t, bool> migrating;
+    map<MachineId_t, vector<VMId_t>> machines_vms_map;
+    vector<VMId_t> vms;
+private:
 };
 
 
