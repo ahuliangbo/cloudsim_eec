@@ -104,7 +104,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         if((m_info.memory_size - m_info.memory_used - t_info.required_memory - VM_MEMORY_OVERHEAD < 0 && !maxHeap.empty())  ){ 
             continue;
         }
-        if(b_ETA*1.0 / t_info.target_completion > 1.0 ){//arbitrary threshold
+        if(b_ETA*1.0 / t_info.target_completion > .85 ){//arbitrary threshold
             continue;
         }
         cout << b_ETA << " " << t_info.target_completion << " " << BestFit  <<endl;
@@ -116,7 +116,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
                 added = true;
                 //add task, update data structures
                 //if eta vs required time ratio is too low
-                if(b_ETA / t_info.target_completion > 2){
+                if(b_ETA / t_info.target_completion > 2.){
                      priority = HIGH_PRIORITY;
                 }
                 
@@ -132,7 +132,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
             machines_vms_map[BestFit].push_back(vm);
             // vms.pushback();
 
-            if(b_ETA / t_info.target_completion > 2){
+            if(b_ETA / t_info.target_completion > 2.){
                 priority = HIGH_PRIORITY;
             }
             AddTask(task_id, vm, priority);
