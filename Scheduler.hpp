@@ -1,5 +1,6 @@
 
 //
+//
 //  Scheduler.hpp
 //  CloudSim
 //
@@ -26,10 +27,11 @@ public:
     void AddTask(TaskId_t task_id, VMId_t vm_id, Priority_t priority);
     void RemoveTask(TaskId_t task_id, VMId_t vm_id);
     map<MachineId_t, unsigned int> machines_mm;
+    map<TaskId_t, VMId_t> tasks;
+    map<MachineId_t, unsigned long long> machines_energy_map; //energy consumption
+    map<MachineId_t, unsigned > avg_fail;
 private:
     vector<VMId_t> vms;
-    map<TaskId_t, VMId_t> tasks;
-    map<MachineId_t, unsigned long long> machines_map; //energy consumption
     map<MachineId_t, vector<VMId_t>> machines_vms_map;
     vector<MachineId_t> machines;
 };
