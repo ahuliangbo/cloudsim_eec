@@ -28,7 +28,7 @@ public:
 private:
     vector<VMId_t> vms;
     map<TaskId_t, VMId_t> tasks;
-    map<MachineId_t, unsigned long long> machines_map;
+    map<MachineId_t, unsigned long long> machines_map;//adds up taget completion times
     map<MachineId_t, vector<VMId_t>> machines_vms_map;
     vector<MachineId_t> machines;
 };

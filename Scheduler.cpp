@@ -9,7 +9,9 @@
 
 static bool migrating = false;
 static unsigned active_machines = 16;
-
+static unsigned long long avg_task_time = 0;
+static unsigned long long num_tasks = 0;
+static unsigned long long time_tasks = 0;
 static unsigned long long instr = 0;
 void Scheduler::Init() {
     // Find the parameters of the clusters
@@ -75,6 +77,9 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     TaskInfo_t t_info = GetTaskInfo(task_id);
     Priority_t priority = (t_info.required_sla != SLAType_t::SLA3)? MID_PRIORITY : LOW_PRIORITY;
 
+    time_tasks+= t_info.target_completion- t_info.arrival;
+    num_tasks++;
+    avg_task_time = time_tasks/num_tasks;
     static int ss = 0;
     //chatgpt comparator and maxHeap
     auto cmp = [](const std::pair<unsigned, unsigned long long>& a, const std::pair<unsigned, unsigned long long>& b) {
@@ -82,13 +87,40 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     };
     std::priority_queue<std::pair<unsigned, unsigned long long>, std::vector<std::pair<unsigned, unsigned long long>>, decltype(cmp)> maxHeap(cmp);
 
-    
+    if( t_info.target_completion- t_info.arrival < avg_task_time){
+        auto cmp = [](const std::pair<unsigned, unsigned long long>& a, const std::pair<unsigned, unsigned long long>& b) {
+            return a.second > b.second; // Min-heap based on second element
+        };
+        std::priority_queue<std::pair<unsigned, unsigned long long>, std::vector<std::pair<unsigned, unsigned long long>>, decltype(cmp)> minHeap(cmp);
+        for(int i =0; i < Machine_GetTotal(); ++i){
+            MachineInfo_t m_info = Machine_GetInfo(machines[i]);
+            unsigned long long ETA = machines_map[machines[i]];
+            minHeap.push({ machines[i],ETA });
+        }
+        for(int i =0; i < Machine_GetTotal(); ++i){
+            MachineInfo_t m_info = Machine_GetInfo(minHeap.top().first);
+            // cout << minHeap.top().first << " " << minHeap.top().second << endl;
+            minHeap.pop();
+            if(t_info.required_cpu == m_info.cpu){
+                            //make vm and add
+                            ss++;
+                VMId_t vm = VM_Create( t_info.required_vm, t_info.required_cpu);
+                VM_Attach(vm, m_info.machine_id);
+                machines_vms_map[m_info.machine_id].push_back(vm);
+                // vms.pushback();
+                priority = HIGH_PRIORITY;
+                AddTask(task_id, vm, priority);
+                break;
+            }
+        }
+        
+    }
 
     instr += t_info.total_instructions ;
     std::cout << "Time: " << Now()<< " Target(): " << t_info.target_completion<< " Instructions "<< t_info.remaining_instructions  <<std::endl;
     for(int i =0; i < Machine_GetTotal(); ++i){
         MachineInfo_t m_info = Machine_GetInfo(machines[i]);
-        unsigned long long ETA = machines_map[machines[i]]/(m_info.performance[m_info.p_state] * m_info.num_cpus) + Now();
+        unsigned long long ETA = machines_map[machines[i]];
         std::cout << "Machine ID: " << machines[i] << " -> Instructions: " << ETA << std::endl;
         maxHeap.push({ machines[i],ETA });
     }
@@ -99,7 +131,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         MachineId_t BestFit = maxHeap.top().first;
         maxHeap.pop();
         MachineInfo_t m_info = Machine_GetInfo(BestFit);
-        unsigned long long b_ETA = machines_map[BestFit]/(m_info.performance[m_info.p_state] * m_info.num_cpus)+ Now();
+        unsigned long long b_ETA = machines_map[BestFit];
 
         if((m_info.memory_size - m_info.memory_used - t_info.required_memory - VM_MEMORY_OVERHEAD < 0 && !maxHeap.empty())  ){ 
             continue;
@@ -140,7 +172,6 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         }
     }
 
-    //bandaid last resort
     if(!added){
         
         auto cmp = [](const std::pair<unsigned, unsigned long long>& a, const std::pair<unsigned, unsigned long long>& b) {
@@ -149,7 +180,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         std::priority_queue<std::pair<unsigned, unsigned long long>, std::vector<std::pair<unsigned, unsigned long long>>, decltype(cmp)> minHeap(cmp);
         for(int i =0; i < Machine_GetTotal(); ++i){
             MachineInfo_t m_info = Machine_GetInfo(machines[i]);
-            unsigned long long ETA = machines_map[machines[i]]/(m_info.performance[m_info.p_state] * m_info.num_cpus);
+            unsigned long long ETA = machines_map[machines[i]];
             minHeap.push({ machines[i],ETA });
         }
         for(int i =0; i < Machine_GetTotal(); ++i){
@@ -176,17 +207,17 @@ void Scheduler::AddTask(TaskId_t task_id, VMId_t vm_id, Priority_t priority) {
     TaskInfo_t t_info = GetTaskInfo(task_id);
     VM_AddTask(vm_id, task_id, priority);
     tasks[task_id] = vm_id;
-    machines_map[v_info.machine_id] += t_info.total_instructions;
+    machines_map[v_info.machine_id] += t_info.target_completion - t_info.arrival;
     // cout<< t_info.total_instructions << endl;
-    machines_mm[v_info.machine_id]++;
 }
 void Scheduler::RemoveTask(TaskId_t task_id, VMId_t vm_id) {
     VMInfo_t v_info = VM_GetInfo(vm_id);
     TaskInfo_t t_info = GetTaskInfo(task_id);
     tasks.erase(task_id);
+    machines_mm[v_info.machine_id]++;
     
     machines_map[v_info.machine_id] = machines_map[v_info.machine_id]<t_info.total_instructions ?
-    0 : machines_map[v_info.machine_id]-t_info.total_instructions;
+    0 : machines_map[v_info.machine_id]-t_info.target_completion + t_info.arrival ;
     
 }
 
