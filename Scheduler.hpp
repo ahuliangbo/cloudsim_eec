@@ -30,6 +30,7 @@ public:
     map<TaskId_t, VMId_t> tasks;
     map<MachineId_t, unsigned long long> machines_energy_map; //energy consumption
     map<MachineId_t, unsigned > avg_fail;
+    map<MachineId_t, bool> machines_sleep_map; //energy consumption
 private:
     vector<VMId_t> vms;
     map<MachineId_t, vector<VMId_t>> machines_vms_map;

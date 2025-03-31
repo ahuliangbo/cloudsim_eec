@@ -26,6 +26,9 @@ void Scheduler::Init() {
     // 
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
+
+
+
     for(int i =0; i < Machine_GetTotal(); ++i){
         machines.push_back(MachineId_t(i));
         machines_mm[machines[i]] = 0;
@@ -34,7 +37,8 @@ void Scheduler::Init() {
         // vms.push_back(vm);
         machines_vms_map[machines[i]].push_back(vm);
         VM_Attach(vm, machines[i]);
-
+        machines_sleep_map[machines[i]] = false;
+        avg_fail[machines[i]] = 1;
     }
     tasks_per_vm = GetNumTasks()/ tasks_per_vm + 1;
     // for (const auto& pair : machines_vms_map) {
@@ -79,7 +83,9 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // Other possibilities as desired
     TaskInfo_t t_info = GetTaskInfo(task_id);
     Priority_t priority = (t_info.required_sla != SLAType_t::SLA3)? MID_PRIORITY : LOW_PRIORITY;
-
+    std::sort(machines.begin(), machines.end(), [this](MachineId_t a, MachineId_t b) {
+        return machines_energy_map[a] < machines_energy_map[b];
+    });
 
     bool added = false;
     for(int i =0; i < Machine_GetTotal(); ++i){
@@ -87,14 +93,16 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         unsigned workload = 1;
         unsigned utilization = m_info.active_tasks;
         if(m_info.memory_size - m_info.memory_used - t_info.required_memory - VM_MEMORY_OVERHEAD < 0 || 
-            workload + utilization > avg_fail[machines[i]] ){ 
+            workload + utilization > avg_fail[machines[i]] ||machines_sleep_map[machines[i]] ){ 
             continue;
         }
         // if(utilization == 0 && added){
-        //     Machine_SetState(machines[i], MachineState_t::S3);
-        // }else{
+        //     Machine_SetState(machines[i], MachineState_t::S0);
+        //     machines_sleep_map[machines[i]] =true;
+        // }else if (m_info.s_state != MachineState_t::S0){
         //     Machine_SetState(machines[i], MachineState_t::S0);
         // }
+
         if(!added){
             for(int j = 0; j < machines_vms_map[machines[i]].size(); ++j){
                 VMId_t vm = machines_vms_map[machines[i]][j];
@@ -122,9 +130,12 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         }
 
     }
-    if(!added){
+    while(!added){
         //choose random machine
         int randomNum = std::rand() % machines.size();
+        // if(machines_sleep_map[machines[randomNum]]){
+        //     continue;
+        // }
         MachineInfo_t m_info = Machine_GetInfo(machines[randomNum]);
         //create_vm
         VMId_t vm = VM_Create( t_info.required_vm, t_info.required_cpu);
@@ -156,6 +167,10 @@ void Scheduler::PeriodicCheck(Time_t now) {
     // SchedulerCheck is called periodically by the simulator to allow you to monitor, make decisions, adjustments, etc.
     // Unlike the other invocations of the scheduler, this one doesn't report any specific event
     // Recommendation: Take advantage of this function to do some monitoring and adjustments as necessary
+
+    for(auto machine: machines){
+        machines_energy_map[machine] = Machine_GetEnergy(machine);
+    }
 }
 
 void Scheduler::Shutdown(Time_t time) {
@@ -184,8 +199,13 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     std::sort(machines.begin(), machines.end(), [this](int a, int b) {
         return Machine_GetInfo(a).active_tasks > Machine_GetInfo(b).active_tasks;
     });
-
     avg_fail[machine]++;
+
+    if(VM_GetInfo(vm).active_tasks.size() == 0 ){
+        VM_Shutdown(vm);
+        machines_vms_map[machine].erase(std::remove(machines_vms_map[machine].begin(), machines_vms_map[machine].end(), vm), machines_vms_map[machine].end());
+        vms.erase(std::remove(vms.begin(), vms.end(), vm), vms.end());
+    }
 
     SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now), 1);
 }
@@ -236,7 +256,7 @@ void SimulationComplete(Time_t time) {
     cout << "Total Energy " << Machine_GetClusterEnergy() << "KW-Hour" << endl;
     cout << "Simulation run finished in " << double(time)/1000000 << " seconds" << endl;
     SimOutput("SimulationComplete(): Simulation finished at time " + to_string(time), 4);
-    for (const auto& pair : Scheduler.machines_mm) {
+    for (const auto& pair : Scheduler.avg_fail) {
         std::cout << "Machine ID: " << pair.first << " -> Task Count: " << pair.second << std::endl;
     }
 
@@ -246,11 +266,19 @@ void SimulationComplete(Time_t time) {
 void SLAWarning(Time_t time, TaskId_t task_id) {
     VMId_t vm = Scheduler.tasks[task_id];
     MachineId_t machine = VM_GetInfo(vm).machine_id;
-    Scheduler.avg_fail[machine] /= 2;
+    Scheduler.avg_fail[machine] /= 2+1;
     //migrate excess tasks
+
+
     // SimOutput("actual time " + to_string(time) + " expected " + to_string(GetTaskInfo(task_id).target_completion) + "  arrival "+ to_string(GetTaskInfo(task_id).arrival), 0);
 }
 
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
     // Called in response to an earlier request to change the state of a machine
+    if(
+        Machine_GetInfo(machine_id).s_state == MachineState_t::S0){
+        Scheduler.machines_sleep_map[machine_id] =false;
+    }else{
+        Scheduler.machines_sleep_map[machine_id] =true;
+    }
 }
