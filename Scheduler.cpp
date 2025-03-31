@@ -9,7 +9,6 @@
 
 static bool migrating = false;
 static unsigned active_machines = 16;
-
 static unsigned long long instr = 0;
 void Scheduler::Init() {
     // Find the parameters of the clusters
@@ -30,6 +29,7 @@ void Scheduler::Init() {
         // vms.push_back(vm);
         machines_vms_map[machines[i]].push_back(vm);
         VM_Attach(vm, machines[i]);
+        machines_accuracy_map[machines[i]] = 1;
       
     }
     // for (const auto& pair : machines_vms_map) {
@@ -85,11 +85,11 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     
 
     instr += t_info.total_instructions ;
-    std::cout << "Time: " << Now()<< " Target(): " << t_info.target_completion<< " Instructions "<< t_info.remaining_instructions  <<std::endl;
+    // std::cout << "Time: " << Now()<< " Target(): " << t_info.target_completion<< " Instructions "<< t_info.remaining_instructions  <<std::endl;
     for(int i =0; i < Machine_GetTotal(); ++i){
         MachineInfo_t m_info = Machine_GetInfo(machines[i]);
         unsigned long long ETA = machines_map[machines[i]]/(m_info.performance[m_info.p_state] * m_info.num_cpus) + Now();
-        std::cout << "Machine ID: " << machines[i] << " -> Instructions: " << ETA << std::endl;
+        // std::cout << "Machine ID: " << machines[i] << " -> Instructions: " << ETA << std::endl;
         maxHeap.push({ machines[i],ETA });
     }
     //get top 
@@ -104,7 +104,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         if((m_info.memory_size - m_info.memory_used - t_info.required_memory - VM_MEMORY_OVERHEAD < 0 && !maxHeap.empty())  ){ 
             continue;
         }
-        if(b_ETA*1.0 / t_info.target_completion > .85 ){//arbitrary threshold
+        if(b_ETA*1.0 / t_info.target_completion > 1-t_info.required_sla * .05 *machines_accuracy_map[BestFit]){//arbitrary threshold, based off sla
             continue;
         }
         cout << b_ETA << " " << t_info.target_completion << " " << BestFit  <<endl;
@@ -159,6 +159,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
             if(t_info.required_cpu == m_info.cpu){
                             //make vm and add
                             ss++;
+                cout<<ss<<endl;
                 VMId_t vm = VM_Create( t_info.required_vm, t_info.required_cpu);
                 VM_Attach(vm, m_info.machine_id);
                 machines_vms_map[m_info.machine_id].push_back(vm);
@@ -178,7 +179,6 @@ void Scheduler::AddTask(TaskId_t task_id, VMId_t vm_id, Priority_t priority) {
     tasks[task_id] = vm_id;
     machines_map[v_info.machine_id] += t_info.total_instructions;
     // cout<< t_info.total_instructions << endl;
-    machines_mm[v_info.machine_id]++;
 }
 void Scheduler::RemoveTask(TaskId_t task_id, VMId_t vm_id) {
     VMInfo_t v_info = VM_GetInfo(vm_id);
@@ -187,7 +187,7 @@ void Scheduler::RemoveTask(TaskId_t task_id, VMId_t vm_id) {
     
     machines_map[v_info.machine_id] = machines_map[v_info.machine_id]<t_info.total_instructions ?
     0 : machines_map[v_info.machine_id]-t_info.total_instructions;
-    
+    machines_accuracy_map[v_info.machine_id] = (machines_mm[v_info.machine_id] * machines_accuracy_map[v_info.machine_id] +  (t_info.target_completion - t_info.arrival)/(Now()- t_info.arrival))/ ++machines_mm[v_info.machine_id];
 }
 
 void Scheduler::PeriodicCheck(Time_t now) {
@@ -275,7 +275,6 @@ void SimulationComplete(Time_t time) {
 
 void SLAWarning(Time_t time, TaskId_t task_id) {
     
-    // SimOutput("actual time " + to_string(time) + " expected " + to_string(GetTaskInfo(task_id).target_completion) + "  arrival "+ to_string(GetTaskInfo(task_id).arrival), 0);
 }
 
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
