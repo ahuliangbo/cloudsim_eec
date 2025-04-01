@@ -274,7 +274,7 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
     });
     cout<<" mv: " << Scheduler.machines_vms_map[machine].size()/2  << "   tot " << Scheduler.vms.size() << " "<< Scheduler.machines[0]<< endl;
     int size = Scheduler.machines_vms_map[machine].size();
-    for(int i = Scheduler.machines_vms_map[machine].size() -1; i > size; --i){
+    for(int i = Scheduler.machines_vms_map[machine].size() -1; i > size/2; --i){
         
         VMId_t vm2 = Scheduler.machines_vms_map[machine][i];
 
